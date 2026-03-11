@@ -7,7 +7,8 @@ from pathlib import Path
 from collections import Counter
 import re
 from groq import Groq
-
+from dotenv import load_dotenv
+load_dotenv()  
 import os
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
@@ -257,7 +258,7 @@ VALID_CATEGORIES = list(CAT_RU.keys())
 # ═══════════════════════════════════════════════════════════════
 # ЗАГРУЗКА ДАННЫХ
 # ═══════════════════════════════════════════════════════════════
-BASE = "/Users/nurdaulet/Documents/NYPDAYLET/SDU/data/analyzed"
+BASE = "data/analyzed"
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_data():
@@ -403,7 +404,7 @@ CFG = {"displayModeBar": False}
 # БОКОВАЯ ПАНЕЛЬ
 # ═══════════════════════════════════════════════════════════════
 with st.sidebar:
-    logo_path = Path("/Users/nurdaulet/Documents/NYPDAYLET/SDU/IMG_2289.JPG")
+    logo_path = Path("SDU/photo_2026-03-12 02.01.27.jpeg")
     if logo_path.exists():
         st.image(str(logo_path), width=140)
     else:
@@ -1353,8 +1354,8 @@ elif page == "AI SEARCH":
                 "<div class='page-sub'>Семантический поиск по смыслу · Работает на ru/kk/en</div>",
                 unsafe_allow_html=True)
 
-    EMB_PATH = Path("/Users/nurdaulet/Documents/NYPDAYLET/SDU/data/processed/embeddings.npy")
-    IDX_PATH = Path("/Users/nurdaulet/Documents/NYPDAYLET/SDU/data/processed/embeddings_index.csv")
+    EMB_PATH = Path("data/processed/embeddings.npy")
+    IDX_PATH = Path("embeddings_index.csv")
     real_mode = EMB_PATH.exists() and IDX_PATH.exists()
 
     # ── Загрузка модели и эмбеддингов ─────────────────────────
