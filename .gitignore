@@ -1,0 +1,9 @@
+lid.176.bin
+*.binlid.176.bin
+*.bin
+lid.176.bin
+venv/
+.env
+sduang.ipynb
+raw_data.csv
+.DS_Store
