@@ -404,7 +404,7 @@ CFG = {"displayModeBar": False}
 # БОКОВАЯ ПАНЕЛЬ
 # ═══════════════════════════════════════════════════════════════
 with st.sidebar:
-    logo_path = Path("SDU/photo_2026-03-12 02.01.27.jpeg")
+    logo_path = Path("photo_2026-03-12 02.06.08.jpeg")
     if logo_path.exists():
         st.image(str(logo_path), width=140)
     else:
