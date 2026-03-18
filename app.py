@@ -11,6 +11,8 @@ import os
 from groq import Groq
 from dotenv import load_dotenv
 load_dotenv()
+import html as _html
+
 
 # ✅ set_page_config ПЕРВЫМ
 st.set_page_config(
@@ -389,6 +391,43 @@ VALID_DEPARTMENTS = [
 VALID_CATEGORIES = list(CAT_RU.keys())
 
 # ═══════════════════════════════════════════════════════════════
+# ЦЕНЗУРА
+# ═══════════════════════════════════════════════════════════════
+CENSOR_WORDS = {
+    "хуй","хуя","хуе","хую","хуев","хуйня","ебанут","сыктым","cиктим","cікт","впизду","ебучи",
+    "пизда","пизде","пизды","пиздец","пиздить","пиздёж",
+    "ебать","ебёт","ебал","ебут","еблан","ебало","ёбаный","ебанный",
+    "блядь","блять","Бля","блядский","долбаеб","далбое",
+    "сука","суки","сучка","сучий",
+    "мудак","мудаки","мудила", "пидор","пидорас","пидр", "шлюха","шлюхи","ублюдок",
+    "уёбок","долбоёб","ёбнутый", "охуеть","охуел","охуела", "нахуй","нахуя","похуй",
+    "заебать","заебал","заебись","далбаеб","далбаебтер","далбаебтар",
+    "шешел","шешелерын","көтақ","қотақ","секс", "хуе", "трах"
+}
+
+
+# ── Функции цензуры ────────────────────────────────────────────
+def censor_text(text: str) -> tuple:
+    if not isinstance(text, str):
+        return text, False
+    found  = False
+    result = text
+    for word in CENSOR_WORDS:
+        pattern = re.compile(re.escape(word), re.IGNORECASE)
+        if pattern.search(result):
+            found  = True
+            result = pattern.sub("*" * len(word), result)
+    return result, found
+
+def render_post_text(text: str, is_expanded: bool = False) -> tuple:
+    censored, has_profanity = censor_text(text)
+    if not is_expanded:
+        show = (censored[:300] + "…") if len(censored) > 300 else censored
+    else:
+        show = censored
+    return show, has_profanity
+
+# ═══════════════════════════════════════════════════════════════
 # ЗАГРУЗКА ДАННЫХ
 # ═══════════════════════════════════════════════════════════════
 BASE = "data/analyzed"
@@ -541,6 +580,7 @@ with st.sidebar:
                      label_visibility="collapsed", key="nav")
 
     st.divider()
+    st.toggle("🔞 **ЦЕНЗУРА**", key="f_censor", value=True)
 
     # ── Фото по центру ───────────────────────────────────────
     logo_path = Path("photo_2026-03-12 02.06.08.jpeg")
@@ -632,6 +672,7 @@ df_f = apply_filters(df) if DATA_OK else pd.DataFrame()
 URG_ICO  = {"low":"🟢","medium":"🟡","high":"🟠","critical":"🔴"}
 SENT_ICO = {"positive":"😊","neutral":"😐","negative":"😠"}
 
+
 def post_card(row, border_col=None, key_prefix="pc"):
     urg   = row.get("llm_urgency", "low")
     sent  = row.get("llm_sentiment", "neutral")
@@ -639,26 +680,47 @@ def post_card(row, border_col=None, key_prefix="pc"):
     dept  = str(row.get("responsible_dept", "")) if pd.notna(row.get("responsible_dept", "")) else "—"
     vir   = float(row.get("virality_score", 0))
     views = int(row.get("views", 0)) if pd.notna(row.get("views", 0)) else 0
-    text_full = str(row.get("message_clean", ""))
     bc    = border_col or URG_C.get(urg, C_MUTED)
 
-    # Уникальный ключ для состояния
-    row_id = str(row.get("message_id", abs(hash(text_full[:30]))))
-    state_key = f"{key_prefix}_{row_id}_expanded"
+  
+    raw       = str(row.get("message_clean", ""))
+    text_full = re.sub(r"<[^>]+>", " ", raw)
+    text_full = re.sub(r"\s+", " ", text_full).strip()
+    text_safe = _html.escape(text_full)
+    
+
+    # ── Уникальный ключ — ПОСЛЕ text_full ─────────────────────
+    row_id      = str(row.get("message_id", abs(hash(text_full[:30]))))
+    state_key   = f"{key_prefix}_{row_id}_expanded"
     is_expanded = st.session_state.get(state_key, False)
 
-    text_show = text_full if is_expanded else (
-        (text_full[:300] + "…") if len(text_full) > 300 else text_full
-    )
+    # ── Цензура ────────────────────────────────────────────────
+    censor_on = st.session_state.get("f_censor", True)
+    if censor_on:
+        text_show, has_profanity = render_post_text(text_safe, is_expanded)
+    else:
+        has_profanity = False
+        text_show = text_safe if is_expanded else (
+            (text_safe[:300] + "…") if len(text_safe) > 300 else text_safe
+        )
+
     show_btn = len(text_full) > 300
 
+    # ── Бейдж мата ─────────────────────────────────────────────
+    profanity_badge = (
+        "<span style='background:#fef9c3;color:#854d0e;border:1px solid #fde68a;"
+        "border-radius:6px;padding:1px 7px;font-size:10px;font-weight:600;"
+        "margin-left:6px'>⚠ ненормативная лексика</span>"
+    ) if has_profanity and censor_on else ""
+
+    # Изменение здесь: {profanity_badge} теперь на одной строке с остальным текстом
     st.markdown(f"""
     <div class="post-card" style="border-left:3px solid {bc}">
         <div class="post-meta">
             {URG_ICO.get(urg, '')}
             <span class="badge b-{urg}">{URG_RU.get(urg, urg)}</span>
             <span class="badge b-{sent}">{SENT_ICO.get(sent, '')} {SENT_RU.get(sent, sent)}</span>
-            <b style="color:#6b8fb8">{cat}</b> · 🏢 {dept} · 👁 {views:,} · ⚡ {vir:.0f}
+            <b style="color:#6b8fb8">{cat}</b> · 🏢 {dept} · 👁 {views:,} · ⚡ {vir:.0f} {profanity_badge}
         </div>
         <div class="post-text">{text_show}</div>
     </div>""", unsafe_allow_html=True)
@@ -669,7 +731,15 @@ def post_card(row, border_col=None, key_prefix="pc"):
             st.session_state[state_key] = not is_expanded
             st.rerun()
 
-    return ""  # совместимость со старым кодом
+    return ""
+
+
+
+
+
+
+
+
 
 # ═══════════════════════════════════════════════════════════════
 # ══════════════════ СТРАНИЦА 1: OVERVIEW ═══════════════════════
@@ -954,7 +1024,7 @@ if page == "OVERVIEW":
                             max_tokens=400,
                             messages=[
                                 {"role": "system",
-                                 "content": "Аналитик SDU. Кратко и по делу на русском."},
+                                 "content": "Аналитик постов студентов SDU Университета. Кратко и по делу на русском."},
                                 {"role": "user", "content": prompt}
                             ]
                         )
@@ -1228,34 +1298,7 @@ elif page == "TOPICS":
         tp_show = tp_show.head(n_tp)
 
     for _, r in tp_show.iterrows():
-        post_card(r, key_prefix=f"tp_{sel_cat_en}")
-        urg   = r.get("llm_urgency","low")
-        sent  = r.get("llm_sentiment","neutral")
-        dept  = str(r.get("responsible_dept","")) if pd.notna(r.get("responsible_dept","")) else "—"
-        vir   = float(r.get("virality_score",0))
-        views = int(r.get("views",0)) if pd.notna(r.get("views",0)) else 0
-        text  = str(r.get("message_clean",""))
-        text  = (text[:290] + "…") if len(text) > 290 else text
-        # Топик — яркая цветная плашка
-        topic_val = str(r.get("llm_topic","")) if pd.notna(r.get("llm_topic","")) else ""
-        topic_badge = (
-            f"<span style='background:{cat_color};color:#fff;border-radius:6px;"
-            f"padding:3px 10px;font-size:11px;font-weight:700;margin-right:6px;"
-            f"letter-spacing:.3px'>🏷 {topic_val}</span>"
-            if topic_val and topic_val not in ("nan","None","") else ""
-        )
-        urg_c = URG_C.get(urg, C_MUTED)
-        st.markdown(f"""
-        <div class="post-card" style="border-left:3px solid {urg_c}">
-            <div class="post-meta" style="margin-bottom:9px">
-                {URG_ICO.get(urg,'')}
-                <span class="badge b-{urg}">{URG_RU.get(urg,urg)}</span>
-                <span class="badge b-{sent}">{SENT_ICO.get(sent,'')} {SENT_RU.get(sent,sent)}</span>
-                {topic_badge}
-                🏢 {dept} · 👁 {views:,} · ⚡ {vir:.0f}
-            </div>
-            <div class="post-text">{text}</div>
-        </div>""", unsafe_allow_html=True)
+         post_card(r, key_prefix=f"tp_{sel_cat_en}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SDU Angime — Улучшенные страницы: SENTIMENT, AI SEARCH, AI INSIGHTS
@@ -1559,7 +1602,7 @@ elif page == "SENTIMENT":
                                 max_tokens=350,
                                 messages=[
                                     {"role": "system",
-                                     "content": "Аналитик SDU. Кратко, конкретно, на русском."},
+                                    "content": "Аналитик постов студентов SDU Университета. Кратко и по делу на русском."},
                                     {"role": "user", "content": prompt}
                                 ]
                             )
@@ -1640,71 +1683,76 @@ elif page == "SENTIMENT":
 # ═══════════════════════════════════════════════════════════════
 # ══════════════════ СТРАНИЦА 4: AI SEARCH ══════════════════════
 # ═══════════════════════════════════════════════════════════════
-
 elif page == "AI SEARCH":
     st.markdown("<div class='page-title'>🔍 AI Search</div>"
-                "<div class='page-sub'>Семантический поиск по смыслу · Работает на ru/kk/en</div>",
+                "<div class='page-sub'>Поиск по смыслу (Semantic) или точному совпадению (Текстовый)</div>",
                 unsafe_allow_html=True)
 
-    EMB_PATH  = Path("data/processed/embeddings.npy")
-    IDX_PATH  = Path("data/processed/embeddings_index.csv")
+    EMB_PATH = Path("data/processed/embeddings.npy")
+    IDX_PATH = Path("data/processed/embeddings_index.csv")
     real_mode = EMB_PATH.exists() and IDX_PATH.exists()
 
-    # ── Загрузка модели и эмбеддингов (кешируется) ────────────
     @st.cache_resource(show_spinner="⏳ Загружаем модель эмбеддингов…")
     def load_embeddings():
         from sentence_transformers import SentenceTransformer, util as st_util
         model      = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2", device="cpu")
         embeddings = np.load(str(EMB_PATH))
-        emb_index  = pd.read_csv(str(IDX_PATH))   # колонки: message_id (+ возможно другие)
+        emb_index  = pd.read_csv(str(IDX_PATH))
         return model, embeddings, st_util, emb_index
 
     if real_mode:
         try:
             emb_model, embeddings, st_util, emb_index = load_embeddings()
-            st.markdown(
-                f"<div class='banner-info'>✅ Semantic Search активен "
-                f"· {embeddings.shape[0]:,} постов · multilingual MiniLM</div>",
-                unsafe_allow_html=True
-            )
         except Exception as e:
             real_mode = False
-            st.markdown(
-                f"<div class='banner-warn'>⚠ Не удалось загрузить embeddings: {e}</div>",
-                unsafe_allow_html=True
+            st.markdown(f"<div class='banner-warn'>⚠ Embeddings не загрузились: {e}</div>",
+                        unsafe_allow_html=True)
+
+    # ── Режим поиска ───────────────────────────────────────────
+    col_mode, col_k = st.columns([4, 1])
+    with col_mode:
+        if real_mode:
+            search_mode = st.radio(
+                "Режим поиска",
+                ["Semantic (по смыслу)", "Текстовый (по словам)"],
+                horizontal=True, key="search_mode"
             )
-    else:
-        st.markdown(
-            "<div class='banner-warn'>⚠ embeddings.npy не найден → TF-IDF режим. "
-            "Сохрани <code>data/processed/embeddings.npy</code>.</div>",
-            unsafe_allow_html=True
-        )
+        else:
+            search_mode = "Текстовый (по словам)"
+            st.markdown("<div class='banner-warn'>⚠ embeddings.npy не найден → только Текстовый режим</div>",
+                        unsafe_allow_html=True)
+
+    top_k = col_k.number_input("Top-K", 5, 100, 15, 5)
 
     # ── Поисковая строка ───────────────────────────────────────
-    c_q, c_k = st.columns([5, 1])
-    query = c_q.text_input(
-        "", placeholder="Введи запрос на любом языке: интернет, асхана, стипендия…",
-        label_visibility="collapsed",
-        key="search_query",
-        value=st.session_state.get("search_query_prefill", "")
-    )
-    top_k = c_k.number_input("Top-K", 5, 100, 15, 5)
+    # ✅ Примеры пишут напрямую в search_query
+    if "search_query_set" in st.session_state:
+        default_query = st.session_state.pop("search_query_set")
+    else:
+        default_query = st.session_state.get("search_query_val", "")
 
-    # ── Фильтры поиска ─────────────────────────────────────────
+    query = st.text_input(
+        "", placeholder="Введите запрос для поиска: интернет, асхана, стипендия, стресс…",
+        label_visibility="collapsed",
+        key="search_query_val",
+        value=default_query
+    )
+
+    # ── Фильтры ────────────────────────────────────────────────
     f1, f2, f3, f4 = st.columns(4)
     CAT_EN = {v: k for k, v in CAT_RU.items()}
+    f_sc = f1.multiselect("Категория", [CAT_RU[c] for c in VALID_CATEGORIES],
+                           key="s_cat", placeholder="Все")
+    f_ss = f2.multiselect("Тональность", ["positive", "neutral", "negative"],
+                           format_func=lambda x: SENT_RU[x],
+                           key="s_sent", placeholder="Все")
+    f_su = f3.multiselect("Приоритет", ["critical", "high", "medium", "low"],
+                           format_func=lambda x: URG_RU[x],
+                           key="s_urg", placeholder="Все")
+    sort_s = f4.selectbox("Сортировка",
+                           ["По релевантности", "По virality", "По дате"])
 
-    f_sc   = f1.multiselect("Категория",   [CAT_RU[c] for c in VALID_CATEGORIES],
-                             key="s_cat", placeholder="Все")
-    f_ss   = f2.multiselect("Тональность", ["positive", "neutral", "negative"],
-                             format_func=lambda x: SENT_RU[x],
-                             key="s_sent", placeholder="Все")
-    f_su   = f3.multiselect("Приоритет",   ["critical", "high", "medium", "low"],
-                             format_func=lambda x: URG_RU[x],
-                             key="s_urg", placeholder="Все")
-    sort_s = f4.selectbox("Сортировка", ["По релевантности", "По virality", "По дате"])
-
-    # ── Пул — фильтры применяются ЗДЕСЬ ───────────────────────
+    # ── Пул с фильтрами ────────────────────────────────────────
     pool = df_f[df_f["message_clean"].notna()].copy().reset_index(drop=True)
     if f_sc:
         pool = pool[pool["llm_category"].isin([CAT_EN.get(c, c) for c in f_sc])]
@@ -1717,18 +1765,12 @@ elif page == "AI SEARCH":
     if query.strip():
         with st.spinner("Ищем…"):
 
-            if real_mode:
-                # ── Семантический поиск ────────────────────────
-                # Маппинг message_id → позиция в матрице эмбеддингов
-                # emb_index имеет колонку message_id, индекс = позиция в embeddings
+            if search_mode == "Semantic (по смыслу)" and real_mode:
+                # ── Semantic поиск ─────────────────────────────
                 idx_col = "message_id"
-
                 pool_merged = pool.merge(
-                    emb_index[[idx_col]].reset_index().rename(
-                        columns={"index": "emb_pos"}
-                    ),
-                    on=idx_col,
-                    how="inner"
+                    emb_index[[idx_col]].reset_index().rename(columns={"index": "emb_pos"}),
+                    on=idx_col, how="inner"
                 ).reset_index(drop=True)
 
                 if len(pool_merged) == 0:
@@ -1738,34 +1780,23 @@ elif page == "AI SEARCH":
                 q_vec    = emb_model.encode([query], normalize_embeddings=True)
                 pool_emb = embeddings[pool_merged["emb_pos"].values]
                 scores   = st_util.dot_score(q_vec, pool_emb)[0].numpy()
-
                 pool_merged["_score"] = scores
                 pool_copy = pool_merged.copy()
+                method_label = "🧠 Semantic"
 
             else:
-                # ── TF-IDF fallback ────────────────────────────
-                @st.cache_resource(show_spinner="Строим TF-IDF индекс…")
-                def build_tfidf(texts_tuple):
-                    from sklearn.feature_extraction.text import TfidfVectorizer
-                    from sklearn.preprocessing import normalize
-                    texts = list(texts_tuple)
-                    vec   = TfidfVectorizer(max_features=20000, ngram_range=(1, 2), min_df=2)
-                    mat   = normalize(vec.fit_transform(texts), norm="l2")
-                    return vec, mat
+                # ── Текстовый поиск ────────────────────────────
+                words = [w for w in query.lower().split() if len(w) > 1]
 
-                from sklearn.preprocessing import normalize as norm_fn
-                texts_tuple = tuple(pool["message_clean"].fillna("").tolist()[:100])
-                vec, mat    = build_tfidf(texts_tuple)
-
-                # Строим полную матрицу для текущего пула
-                all_texts = pool["message_clean"].fillna("").tolist()
-                from sklearn.preprocessing import normalize as norm_fn2
-                full_mat  = norm_fn2(vec.transform(all_texts), norm="l2")
-                q_v       = norm_fn2(vec.transform([query]), norm="l2")
-                scores    = (full_mat @ q_v.T).toarray().flatten()
+                def text_score(text):
+                    t = str(text).lower()
+                    return sum(t.count(w) for w in words)
 
                 pool_copy = pool.copy()
-                pool_copy["_score"] = scores
+                pool_copy["_score"] = pool_copy["message_clean"].apply(text_score)
+                # Оставляем только где есть хоть одно совпадение
+                pool_copy = pool_copy[pool_copy["_score"] > 0]
+                method_label = "🔤 Текстовый"
 
         # ── Сортировка ─────────────────────────────────────────
         if sort_s == "По релевантности":
@@ -1775,127 +1806,84 @@ elif page == "AI SEARCH":
         else:
             result = pool_copy.sort_values("date", ascending=False).head(top_k)
 
-        # ── AI интерпретация ───────────────────────────────────
-        if groq_client and len(result) >= 3:
-            with st.expander("🤖 AI интерпретация результатов", expanded=False):
-                ai_search_key = f"ai_search_{query[:30]}"
-                if st.button("Проанализировать найденные посты", key="search_ai_btn"):
-                    top_texts = result.head(10)["message_clean"].fillna("").tolist()
-                    ai_prompt = (
-                        f"Студенты SDU написали эти посты по теме «{query}»:\n\n" +
-                        "\n".join([f"- {t[:150]}" for t in top_texts]) +
-                        "\n\nКратко (3-4 предложения): в чём суть проблемы и что рекомендуешь руководству?"
-                    )
-                    with st.spinner("Анализирую…"):
-                        try:
-                            resp = groq_client.chat.completions.create(
-                                model=MODEL_CHAT, max_tokens=300,
-                                messages=[{"role": "user", "content": ai_prompt}]
-                            )
-                            st.session_state[ai_search_key] = resp.choices[0].message.content
-                        except Exception as e:
-                            st.error(f"Ошибка: {e}")
-
-                if st.session_state.get(ai_search_key):
-                    st.markdown(f"""
-                    <div style='background:#eef2ff;border:1px solid #c7d2fe;
-                                border-radius:12px;padding:16px 20px;
-                                color:#3730a3;font-size:14px;line-height:1.8'>
-                        🤖 {st.session_state[ai_search_key]}
-                    </div>""", unsafe_allow_html=True)
-
-        # ── Результаты ─────────────────────────────────────────
-        method_label = "🧠 Semantic" if real_mode else "🔤 TF-IDF"
+        # ── Счётчик ────────────────────────────────────────────
         st.markdown(
             f"<div style='font-size:13px;color:{C_MUTED};margin-bottom:12px'>"
-            f"{method_label} · Найдено <b style='color:{C_TEXT}'>{len(result)}</b> постов "
+            f"{method_label} · Найдено "
+            f"<b style='color:{C_TEXT}'>{len(result)}</b> постов "
             f"из пула <b style='color:{C_TEXT}'>{len(pool):,}</b></div>",
             unsafe_allow_html=True
         )
 
-        for _, r in result.iterrows():
-            sc      = float(r.get("_score", 0))
-            bar     = max(int(sc * 150), 2)
-            date    = str(r.get("date", ""))[:10]
-            urg     = r.get("llm_urgency", "low")
-            sent    = r.get("llm_sentiment", "neutral")
-            cat     = CAT_RU.get(r.get("llm_category", ""), "")
-            dept    = str(r.get("responsible_dept", "")) if pd.notna(r.get("responsible_dept", "")) else "—"
-            vir     = float(r.get("virality_score", 0))
-            lang    = r.get("language", "")
-            urg_c   = URG_C.get(urg, C_MUTED)
+        if len(result) == 0:
+            st.info("Ничего не найдено. Попробуй другой запрос или режим поиска.")
+        else:
+            # ── AI интерпретация ───────────────────────────────
+            if groq_client and len(result) >= 3:
+                with st.expander("🤖 AI интерпретация результатов", expanded=False):
+                    ai_search_key = f"ai_search_{query[:30]}"
+                    if st.button("Проанализировать найденные посты",
+                                 key="search_ai_btn"):
+                        top_texts = result.head(10)["message_clean"].fillna("").tolist()
+                        with st.spinner("Анализирую…"):
+                            try:
+                                resp = groq_client.chat.completions.create(
+                                    model=MODEL_CHAT, max_tokens=300,
+                                    messages=[{"role": "user", "content":
+                                        f"Студенты SDU University написали эти посты по теме «{query}»:\n\n" +
+                                        "\n".join([f"- {t[:150]}" for t in top_texts]) +
+                                        "\n\nКратко (3-4 предложения): суть проблемы и рекомендации для администрации университета касательно этой проблемы?"
+                                    }]
+                                )
+                                st.session_state[ai_search_key] = resp.choices[0].message.content
+                            except Exception as e:
+                                st.error(f"Ошибка: {e}")
 
-            # Уникальный ключ для expand/collapse
-            row_id    = str(r.get("message_id", abs(hash(str(r.get("message_clean", ""))[:30]))))
-            state_key = f"srch_{row_id}_expanded"
-            is_exp    = st.session_state.get(state_key, False)
+                    if st.session_state.get(ai_search_key):
+                        st.markdown(f"""
+                        <div style='background:#eef2ff;border:1px solid #c7d2fe;
+                                    border-radius:12px;padding:16px 20px;
+                                    color:#3730a3;font-size:14px;line-height:1.8'>
+                            🤖 {st.session_state[ai_search_key]}
+                        </div>""", unsafe_allow_html=True)
 
-            text_full = str(r.get("message_clean", ""))
-            text_show = text_full if is_exp else (
-                (text_full[:300] + "…") if len(text_full) > 300 else text_full
-            )
-
-            # Подсветка слов запроса
-            query_words = query.lower().split()
-            for word in query_words:
-                if len(word) > 2:
-                    text_show = re.sub(
-                        f"({re.escape(word)})",
-                        f"<mark style='background:#fef08a;border-radius:3px;padding:0 2px'>\\1</mark>",
-                        text_show, flags=re.IGNORECASE
-                    )
-
-            st.markdown(f"""
-            <div class="post-card" style="border-left:3px solid {urg_c}">
-                <div class="post-meta" style="display:flex;justify-content:space-between;align-items:center">
-                    <div>
-                        {URG_ICO.get(urg, '')}
-                        <span class="badge b-{urg}">{URG_RU.get(urg, urg)}</span>
-                        <span class="badge b-{sent}">{SENT_ICO.get(sent, '')} {SENT_RU.get(sent, sent)}</span>
-                        <b style="color:#6b8fb8">{cat}</b>
-                        · 🏢 {dept} · 🌐 {lang} · 📅 {date} · ⚡ {vir:.0f}
-                    </div>
-                    <div style="display:flex;align-items:center;gap:7px;flex-shrink:0">
-                        <div style="width:{bar}px;height:5px;background:{C_BLUE};border-radius:3px"></div>
-                        <span style="color:{C_BLUE};font-size:11px;font-weight:600">{sc:.3f}</span>
-                    </div>
-                </div>
-                <div class="post-text" style="margin-top:8px">{text_show}</div>
-            </div>""", unsafe_allow_html=True)
-
-            # Кнопка читать полностью
-            if len(text_full) > 300:
-                btn_label = "▲ Свернуть" if is_exp else "▼ Читать полностью"
-                if st.button(btn_label, key=f"btn_{state_key}"):
-                    st.session_state[state_key] = not is_exp
-                    st.rerun()
+            # ── Посты через post_card (цензура работает) ───────
+            for _, r in result.iterrows():
+                post_card(r, key_prefix="srch")
 
     else:
         # ── Стартовый экран ────────────────────────────────────
-        st.markdown("<div class='sec'>💡 Попробуй эти запросы</div>", unsafe_allow_html=True)
+        st.markdown("<div class='sec'>💡 Попробуй эти запросы</div>",
+                    unsafe_allow_html=True)
+
         examples = [
-            ("🌐 Интернет / Мудл",  "портал мудл не работает интернет"),
-            ("🍽 Еда в столовой",   "плохая еда асхана дорого невкусно"),
-            ("💰 Стипендия",        "стипендия задержали не пришла"),
-            ("🥶 Общежитие",        "холодно общежитие батарея"),
-            ("📝 Экзамены",         "квиз мидterm retake дедлайн"),
-            ("🎉 Мероприятия",      "велком пати концерт события"),
-            ("😔 Психология",       "стресс выгорание депрессия тяжело"),
-            ("🏫 Деканат",          "деканат расписание посещаемость GPA"),
+            ("🌐 Интернет / Мудл", "интернет мудл портал"),
+            ("🍽 Еда в столовой", "еда асхана дорого"),
+            ("💰 Стипендия", "стипендия задержали"),
+            ("🥶 Общежитие", "общежитие жатақхана дорм"),
+            ("📝 Экзамены",  "экзамен квиз retake"),
+            ("🎉 Мероприятия", "велком пати event концерт"),
+            ("😔 Психология", "стресс выгорание депрессия"),
+            ("🏫 Деканат", "деканат расписание GPA"),
         ]
         cols = st.columns(4)
         for i, (lbl, q) in enumerate(examples):
             if cols[i % 4].button(lbl, key=f"ex_{i}", use_container_width=True):
-                st.session_state["search_query_prefill"] = q
+                # ✅ Записываем через отдельный ключ чтобы не конфликтовать
+                st.session_state["search_query_set"] = q
                 st.rerun()
 
         st.divider()
 
+        mode_label = "🧠 Semantic" if (real_mode and st.session_state.get("search_mode","").startswith("🧠")) \
+                     else "🔤 Текстовый"
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("📨 Постов в пуле", f"{len(pool):,}")
-        k2.metric("🔍 Режим поиска",  "Semantic 🧠" if real_mode else "TF-IDF 🔤")
-        k3.metric("🌐 Языков",        pool["language"].nunique() if "language" in pool.columns else "—")
-        k4.metric("😠 Негативных",    f"{(pool['llm_sentiment'] == 'negative').sum():,}")
+        k2.metric("🔍 Режим",         mode_label)
+        k3.metric("🌐 Языков",
+                  pool["language"].nunique() if "language" in pool.columns else "—")
+        k4.metric("😠 Негативных",
+                  f"{(pool['llm_sentiment'] == 'negative').sum():,}")
 
 # ═══════════════════════════════════════════════════════════════
 # ══════════════ СТРАНИЦА 5: AI INSIGHTS & REPORTS ══════════════
@@ -1975,12 +1963,12 @@ elif page == "AI INSIGHTS & REPORTS":
                                 model=MODEL_CHAT, max_tokens=400,
                                 messages=[
                                     {"role": "system",
-                                     "content": "Аналитик SDU. Кратко на русском."},
+                                    "content": "Аналитик постов студентов SDU Университета. Кратко и по делу на русском."},
                                     {"role": "user", "content":
                                         f"Критичных постов: {n_crit}, высоких: {n_high}.\n\n"
                                         "Топ посты студентов SDU:\n\n" +
                                         "\n".join([f"- {t[:200]}" for t in texts]) +
-                                        "\n\nОтчёт для ректора (4-5 предл.): "
+                                        "\n\nОтчёт для администрации университета (4-5 предл.): "
                                         "что происходит, какие отделы, что сделать срочно?"
                                     }
                                 ]
@@ -2042,7 +2030,7 @@ elif page == "AI INSIGHTS & REPORTS":
                                 resp = groq_client.chat.completions.create(
                                     model=MODEL_CHAT, max_tokens=300,
                                     messages=[{"role": "user", "content":
-                                        f"В Telegram канале SDU {day_str} было {day_count} постов "
+                                        f"В Telegram канале студентов SDU {day_str} было {day_count} постов "
                                         f"({pct_diff:+.0f}% от среднего {avg_c:.0f}/день).\n\n"
                                         f"Топ посты:\n- {posts_text}\n\n"
                                         f"Объясни в 2-3 предложениях: что произошло в этот день?"
@@ -2207,7 +2195,7 @@ elif page == "AI INSIGHTS & REPORTS":
                                 model=MODEL_CHAT, max_tokens=400,
                                 messages=[
                                     {"role": "system",
-                                     "content": "Аналитик SDU. Кратко и структурированно на русском."},
+                                     "content": "Аналитик постов студентов SDU Университета. Кратко и структурированно на русском."},
                                     {"role": "user", "content":
                                         "Студенты SDU предложили улучшения:\n\n" +
                                         "\n".join([f"- {s}" for s in suggestions]) +
@@ -2416,9 +2404,9 @@ elif page == "AI INSIGHTS & REPORTS":
                                     f"Самые резонансные посты:\n" +
                                     "\n".join([f"- {t[:180]}" for t in top_posts]) +
                                     f"\n\nФокус: {summary_focus}\n"
-                                    f"Напиши Executive Summary ({len_map[summary_len]}) для ректора SDU.\n"
+                                    f"Напиши Executive Summary ({len_map[summary_len]}) для администрации университета.\n"
                                     f"Называй конкретные отделы, % и рекомендации. "
-                                    f"Используй структуру: Ситуация → Проблемы → Рекомендации."
+                                    f"Используй структуру: Ситуация → Проблемы → Рекомендации по решению."
                                 }
                             ]
                         )

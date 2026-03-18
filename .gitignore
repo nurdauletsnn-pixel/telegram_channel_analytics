@@ -7,3 +7,9 @@ venv/
 sduang.ipynb
 raw_data.csv
 .DS_Store
+.env
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+venv/
+.DS_Store
