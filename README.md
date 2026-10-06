@@ -6,6 +6,7 @@
 
 *Built with a **Data-Driven** mindset: every chart, KPI and AI summary is derived from real student posts.*
 
+https://sdu-angime-analytics.streamlit.app
 ---
 
 ## 📖 Table of Contents
